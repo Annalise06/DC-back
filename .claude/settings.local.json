@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"C:\\\\Users\\\\HP\\\\Desktop\\\\Active Projects\\\\DCL\\\\loans\\\\node_modules\\\\.bin\\\\tsc.cmd\" --noEmit --project \"C:\\\\Users\\\\HP\\\\Desktop\\\\Active Projects\\\\DCL\\\\loans\\\\tsconfig.json\")",
+      "PowerShell(& \"C:\\\\Users\\\\HP\\\\Desktop\\\\Active Projects\\\\DCL\\\\loans\\\\node_modules\\\\.bin\\\\tsc.cmd\" --noEmit --project \"C:\\\\Users\\\\HP\\\\Desktop\\\\Active Projects\\\\DCL\\\\loans\\\\tsconfig.json\" 2>&1)"
+    ]
+  }
+}

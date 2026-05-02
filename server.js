@@ -23,8 +23,11 @@ const swaggerUi    = require("swagger-ui-express");
 
 const connectDB    = require("./config/db");
 const swaggerSpec  = require("./config/swagger");
-const authRoutes   = require("./routes/auth");
-const adminRoutes  = require("./routes/admin");
+const authRoutes         = require("./routes/auth");
+const adminRoutes        = require("./routes/admin");
+const loanRoutes         = require("./routes/loans");
+const transactionRoutes  = require("./routes/transactions");
+const { getPublicSettings } = require("./controllers/settingsController");
 const { errorHandler, notFound } = require("./middleware/errorHandler");
 
 // ── Connect to MongoDB ────────────────────────────────────────────────────────
@@ -92,8 +95,11 @@ app.get("/api-docs.json", (req, res) => {
 });
 
 // ── API Routes ────────────────────────────────────────────────────────────────
-app.use("/api/auth",  authLimiter, authRoutes);
-app.use("/api/admin", adminRoutes);
+app.use("/api/auth",         authLimiter, authRoutes);
+app.use("/api/admin",        adminRoutes);
+app.use("/api/loans",        loanRoutes);
+app.use("/api/transactions", transactionRoutes);
+app.get("/api/settings",     getPublicSettings);
 
 // ── 404 handler — catches unknown routes ─────────────────────────────────────
 app.use(notFound);

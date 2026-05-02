@@ -1,5 +1,7 @@
-const USUser = require("../models/USUser");
-const SAUser = require("../models/SAUser");
+const USUser          = require("../models/USUser");
+const SAUser          = require("../models/SAUser");
+const LoanApplication = require("../models/LoanApplication");
+const Transaction     = require("../models/Transaction");
 const { asyncHandler } = require("../middleware/errorHandler");
 
 const LOAN_FIELDS = [
@@ -144,4 +146,199 @@ const deleteUser = asyncHandler(async (req, res) => {
   res.json({ success: true });
 });
 
-module.exports = { listUSUsers, listSAUsers, getUser, updateUser, deleteUser };
+// ─────────────────────────────────────────────────────────────────────────────
+//  LIST LOAN APPLICATIONS
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * @swagger
+ * /admin/loans:
+ *   get:
+ *     summary: List all loan applications
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [all, pending, active, completed, rejected, defaulted] }
+ */
+const listLoans = asyncHandler(async (req, res) => {
+  const { status } = req.query;
+  const filter = status && status !== "all" ? { status } : {};
+
+  const loans = await LoanApplication.find(filter).sort({ createdAt: -1 });
+
+  const formatted = loans.map(l => ({
+    id:       l._id,
+    user:     l.userName,
+    email:    l.userEmail,
+    amount:   l.amount,
+    disbursed: l.disbursedAmount,
+    status:   l.status,
+    rate:     l.approvedInterestRate || "—",
+    term:     l.approvedTerm || l.duration,
+    started:  l.startedAt
+      ? new Date(l.startedAt).toLocaleDateString("en-US", { month: "short", year: "numeric" })
+      : "—",
+    nextDue:  l.nextDueDate
+      ? new Date(l.nextDueDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+      : "—",
+  }));
+
+  res.json({ loans: formatted });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  APPROVE LOAN
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * @swagger
+ * /admin/loans/{id}/approve:
+ *   patch:
+ *     summary: Approve a pending loan application
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ */
+const approveLoan = asyncHandler(async (req, res) => {
+  const loan = await LoanApplication.findById(req.params.id);
+  if (!loan) return res.status(404).json({ error: "Loan application not found." });
+  if (loan.status !== "pending") {
+    return res.status(409).json({ error: "Only pending loans can be approved." });
+  }
+
+  const {
+    interestRate = "8.5%",
+    term,
+    disbursedAmount,
+    nextDueDate,
+  } = req.body;
+
+  const now       = new Date();
+  const disburse  = disbursedAmount ? Number(disbursedAmount) : loan.amount;
+  const approvedTerm = term || loan.duration;
+
+  // Calculate next due date: first day of next month by default
+  let dueDate = nextDueDate
+    ? new Date(nextDueDate)
+    : new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
+  loan.status               = "active";
+  loan.disbursedAmount      = disburse;
+  loan.approvedInterestRate = interestRate;
+  loan.approvedTerm         = approvedTerm;
+  loan.startedAt            = now;
+  loan.nextDueDate          = dueDate;
+  await loan.save();
+
+  const Model = loan.country === "ZA" ? SAUser : USUser;
+  await Model.findByIdAndUpdate(loan.userId, {
+    $set: {
+      loanStatus:      "active",
+      loanApproved:    loan.amount,
+      accountBalance:  disburse,
+      totalWithdrawn:  disburse,
+      interestRate,
+      termRemaining:   approvedTerm,
+      nextPaymentDate: dueDate,
+    },
+  });
+
+  await Transaction.create({
+    userId:  loan.userId,
+    country: loan.country,
+    type:    "loan",
+    desc:    `Loan approved & disbursed — ${loan.purpose}`,
+    amount:  disburse,
+    kind:    "credit",
+  });
+
+  res.json({ message: "Loan approved.", loan: { id: loan._id, status: loan.status } });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  REJECT LOAN
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * @swagger
+ * /admin/loans/{id}/reject:
+ *   patch:
+ *     summary: Reject a pending loan application
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ */
+const rejectLoan = asyncHandler(async (req, res) => {
+  const loan = await LoanApplication.findById(req.params.id);
+  if (!loan) return res.status(404).json({ error: "Loan application not found." });
+  if (loan.status !== "pending") {
+    return res.status(409).json({ error: "Only pending loans can be rejected." });
+  }
+
+  loan.status = "rejected";
+  await loan.save();
+
+  const Model = loan.country === "ZA" ? SAUser : USUser;
+  await Model.findByIdAndUpdate(loan.userId, { $set: { loanStatus: "none" } });
+
+  await Transaction.create({
+    userId:  loan.userId,
+    country: loan.country,
+    type:    "status",
+    desc:    "Loan application rejected",
+    amount:  null,
+    kind:    "neutral",
+  });
+
+  res.json({ message: "Loan rejected.", loan: { id: loan._id, status: loan.status } });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  COMPLETE LOAN
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * @swagger
+ * /admin/loans/{id}/complete:
+ *   patch:
+ *     summary: Mark an active loan as completed
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ */
+const completeLoan = asyncHandler(async (req, res) => {
+  const loan = await LoanApplication.findById(req.params.id);
+  if (!loan) return res.status(404).json({ error: "Loan application not found." });
+  if (loan.status !== "active") {
+    return res.status(409).json({ error: "Only active loans can be marked complete." });
+  }
+
+  loan.status = "completed";
+  await loan.save();
+
+  const Model = loan.country === "ZA" ? SAUser : USUser;
+  await Model.findByIdAndUpdate(loan.userId, {
+    $set: {
+      loanStatus:      "none",
+      termRemaining:   "0 months",
+      nextPaymentDate: null,
+      daysUntilPayment: 0,
+      repaidPercent:   100,
+    },
+  });
+
+  await Transaction.create({
+    userId:  loan.userId,
+    country: loan.country,
+    type:    "status",
+    desc:    "Loan fully repaid — account closed",
+    amount:  null,
+    kind:    "neutral",
+  });
+
+  res.json({ message: "Loan marked complete.", loan: { id: loan._id, status: loan.status } });
+});
+
+module.exports = {
+  listUSUsers, listSAUsers, getUser, updateUser, deleteUser,
+  listLoans, approveLoan, rejectLoan, completeLoan,
+};

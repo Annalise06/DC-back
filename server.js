@@ -40,7 +40,7 @@ app.use(helmet({
 
 // ── CORS — only allow requests from the configured frontend URL ───────────────
 app.use(cors({
-  origin:      process.env.CLIENT_URL || "http://localhost:5173",
+  origin:      [process.env.CLIENT_URL || "http://localhost:5173", "https://dcloans.org"],
   credentials: true, // Required for cookies (refresh token) to be sent cross-origin
   methods:     ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
 }));

@@ -18,32 +18,53 @@ const { asyncHandler } = require("../middleware/errorHandler");
  *     requestBody:
  *       required: true
  *       content:
- *         application/json:
+ *         multipart/form-data:
  *           schema:
- *             type: object
- *             required: [amount, purpose, duration, employment, jobTitle, income, bankName, accountNumber]
- *             properties:
- *               amount:        { type: number }
- *               purpose:       { type: string }
- *               duration:      { type: string }
- *               payDate:       { type: string, format: date }
- *               employment:    { type: string }
- *               jobTitle:      { type: string }
- *               income:        { type: number }
- *               creditScore:   { type: number }
- *               notes:         { type: string }
- *               bankName:      { type: string }
- *               accountNumber: { type: string }
- *               routingNumber: { type: string }
+ *             $ref: '#/components/schemas/LoanApplicationRequest'
  *     responses:
  *       201:
- *         description: Application submitted
+ *         description: Application submitted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: Application submitted successfully.
+ *                 application:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                     status:
+ *                       type: string
+ *                       example: pending
+ *                     amount:
+ *                       type: number
+ *                       example: 5000
  *       400:
- *         description: Validation error
+ *         description: Missing required fields
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
  *       409:
- *         description: Existing pending/active loan
+ *         description: Existing pending or active loan
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */
 const applyForLoan = asyncHandler(async (req, res) => {
+  console.log("BODY:", req.body);
+  console.log("FILES:", req.files);
+  console.log("CONTENT-TYPE:", req.headers['content-type']);
+
   const { id, country } = req.user;
 
   const Model = country === "ZA" ? SAUser : USUser;
@@ -63,10 +84,25 @@ const applyForLoan = asyncHandler(async (req, res) => {
     bankName, accountNumber, routingNumber,
     cashAppTag, cashAppPhone,
   } = req.body;
-
-  if (!amount || !purpose || !duration || !employment || !jobTitle || !income || !bankName || !accountNumber) {
-    return res.status(400).json({ error: "Please fill in all required fields." });
+    // ── Validation ──────────────────────────────────────────────────────────
+  const required = { amount, purpose, duration, employment, jobTitle, income, bankName, accountNumber };
+  const missing  = Object.entries(required).filter(([, v]) => v === undefined || v === null || v === "");
+  if (missing.length > 0) {
+    return res.status(400).json({ error: `Missing fields: ${missing.map(([k]) => k).join(", ")}` });
   }
+
+  // ── Map uploaded files to document objects ──────────────────────────────
+  const uploadedDocs = (req.files || []).map((file, i) => {
+  const labels = req.body.documentLabels;
+  const label  = Array.isArray(labels)
+    ? labels[i]
+    : req.body[`documentLabels[${i}]`] || `Document ${i + 1}`;
+  return {
+    label,
+    url:      file.path,
+    publicId: file.filename,
+  };
+});
 
   const application = await LoanApplication.create({
     userId:    id,
@@ -87,6 +123,8 @@ const applyForLoan = asyncHandler(async (req, res) => {
     routingNumber:  routingNumber  || undefined,
     cashAppTag:     cashAppTag     || undefined,
     cashAppPhone:   cashAppPhone   || undefined,
+    documents:      uploadedDocs,  // ← new
+
   });
 
   await user.updateOne({ loanStatus: "pending" });
@@ -104,6 +142,7 @@ const applyForLoan = asyncHandler(async (req, res) => {
     message:     "Application submitted successfully.",
     application: { id: application._id, status: application.status, amount: application.amount },
   });
+  
 });
 
 module.exports = { applyForLoan };

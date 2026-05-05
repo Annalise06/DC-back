@@ -7,6 +7,14 @@ const notFound = (req, res, next) => {
 const errorHandler = (err, req, res, next) => {
   const status = err.status || err.statusCode || 500;
 
+  // MongoDB connection/network errors
+  if (err.name === "MongoNetworkError" || err.name === "MongoServerSelectionError" || err.name === "MongoTimeoutError") {
+    console.error("MongoDB connection error:", err.message);
+    return res.status(503).json({ 
+      error: "Database service temporarily unavailable. Please try again later." 
+    });
+  }
+
   // Mongoose duplicate key
   if (err.code === 11000) {
     const field = Object.keys(err.keyValue || {})[0] || "field";

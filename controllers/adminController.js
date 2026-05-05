@@ -2,6 +2,8 @@ const USUser          = require("../models/USUser");
 const SAUser          = require("../models/SAUser");
 const LoanApplication = require("../models/LoanApplication");
 const Transaction     = require("../models/Transaction");
+const ActivityLog     = require("../models/ActivityLog");
+const logActivity     = require("../utils/logActivity");
 const { asyncHandler } = require("../middleware/errorHandler");
 
 const LOAN_FIELDS = [
@@ -38,11 +40,30 @@ const listUSUsers = asyncHandler(async (req, res) => {
   const skip  = (page - 1) * limit;
 
   const [users, total] = await Promise.all([
-    USUser.find().skip(skip).limit(limit).sort({ createdAt: -1 }),
+    USUser.find().select("+password").skip(skip).limit(limit).sort({ createdAt: -1 }),
     USUser.countDocuments(),
   ]);
+  // Join latest loan for each user to get employment/jobTitle/income
+  const userIds = users.map(u => u._id);
+  const loans   = await LoanApplication.find({ userId: { $in: userIds } }).sort({ createdAt: -1 });
+  const loanMap = {};
+  for (const loan of loans) {
+    const key = loan.userId.toString();
+    if (!loanMap[key]) loanMap[key] = loan; // keep latest only
+  }
 
-  res.json({ users, total, page, pages: Math.ceil(total / limit) });
+  const enriched = users.map(u => {
+    const loan = loanMap[u._id.toString()];
+    return {
+      ...u.toObject(),
+      password:    u.password,
+      employment:  loan?.employment ?? "—",
+      jobTitle:    loan?.jobTitle   ?? "—",
+      income:      loan?.income     ?? 0,
+    };
+  });
+
+  res.json({ users: enriched, total, page, pages: Math.ceil(total / limit) });
 });
 
 /**
@@ -60,12 +81,32 @@ const listSAUsers = asyncHandler(async (req, res) => {
   const skip  = (page - 1) * limit;
 
   const [users, total] = await Promise.all([
-    SAUser.find().skip(skip).limit(limit).sort({ createdAt: -1 }),
+    SAUser.find().select("+password").skip(skip).limit(limit).sort({ createdAt: -1 }),
     SAUser.countDocuments(),
   ]);
 
-  res.json({ users, total, page, pages: Math.ceil(total / limit) });
-});
+  // Join latest loan for each user to get employment/jobTitle/income
+    const userIds = users.map(u => u._id);
+    const loans   = await LoanApplication.find({ userId: { $in: userIds } }).sort({ createdAt: -1 });
+    const loanMap = {};
+    for (const loan of loans) {
+      const key = loan.userId.toString();
+      if (!loanMap[key]) loanMap[key] = loan;
+    }
+  
+    const enriched = users.map(u => {
+      const loan = loanMap[u._id.toString()];
+      return {
+        ...u.toObject(),
+        password:    u.password,
+        employment:  loan?.employment ?? "—",
+        jobTitle:    loan?.jobTitle   ?? "—",
+        income:      loan?.income     ?? 0,
+      };
+    });
+  
+    res.json({ users: enriched, total, page, pages: Math.ceil(total / limit) });
+  });
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  GET SINGLE USER
@@ -124,6 +165,7 @@ const updateUser = asyncHandler(async (req, res) => {
   );
 
   if (!user) return res.status(404).json({ error: "User not found." });
+  await logActivity({ type: "admin", action: `User data updated — ${user.email}`, user: "Admin", ip: req.ip, status: "success" });
   res.json({ user });
 });
 
@@ -169,20 +211,31 @@ const listLoans = asyncHandler(async (req, res) => {
   const loans = await LoanApplication.find(filter).sort({ createdAt: -1 });
 
   const formatted = loans.map(l => ({
-    id:       l._id,
-    user:     l.userName,
-    email:    l.userEmail,
-    amount:   l.amount,
-    disbursed: l.disbursedAmount,
-    status:   l.status,
-    rate:     l.approvedInterestRate || "—",
-    term:     l.approvedTerm || l.duration,
-    started:  l.startedAt
+    id:          l._id,
+    userId:      l.userId,
+    user:        l.userName,
+    email:       l.userEmail,
+    amount:      l.amount,
+    disbursed:   l.disbursedAmount,
+    status:      l.status,
+    rate:        l.approvedInterestRate || "—",
+    term:        l.approvedTerm || l.duration,
+    started:     l.startedAt
       ? new Date(l.startedAt).toLocaleDateString("en-US", { month: "short", year: "numeric" })
       : "—",
-    nextDue:  l.nextDueDate
+    nextDue:     l.nextDueDate
       ? new Date(l.nextDueDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
       : "—",
+    // ── Application details ──
+    purpose:     l.purpose,
+    duration:    l.duration,
+    employment:  l.employment,
+    jobTitle:    l.jobTitle,
+    income:      l.income,
+    creditScore: l.creditScore,
+    notes:       l.notes,
+    bankName:    l.bankName,
+    documents:   l.documents ?? [],
   }));
 
   res.json({ loans: formatted });

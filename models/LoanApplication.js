@@ -36,6 +36,15 @@ const loanApplicationSchema = new mongoose.Schema(
     approvedTerm:         { type: String, default: "" },
     startedAt:            { type: Date },
     nextDueDate:          { type: Date },
+
+    documents: [
+      {
+        label: { type: String }, // e.g. "ID", "Proof of Income"
+        url:   { type: String, required: true }, // Cloudinary URL
+        publicId: { type: String }, // for deletion later
+        uploadedAt: { type: Date, default: Date.now },
+      }
+    ],
   },
   { timestamps: true }
 );

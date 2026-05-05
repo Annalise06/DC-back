@@ -187,6 +187,12 @@ const usLogin = asyncHandler(async (req, res) => {
     return res.status(401).json({ error: "Invalid email or password." });
   }
 
+  // ── Track login ──
+  await USUser.findByIdAndUpdate(user._id, {
+    $set: { lastLogin: new Date(), lastIp: req.ip || req.headers['x-forwarded-for'] || '' },
+    $inc: { loginCount: 1 },
+  });
+
   const accessToken = await issueTokens(user, res);
   res.json({ accessToken, user: user.toProfile() });
 });
@@ -237,6 +243,12 @@ const saLogin = asyncHandler(async (req, res) => {
   if (!isMatch) {
     return res.status(401).json({ error: "Invalid email or password." });
   }
+
+  // ── Track login ──
+  await SAUser.findByIdAndUpdate(user._id, {
+    $set: { lastLogin: new Date(), lastIp: req.ip || req.headers['x-forwarded-for'] || '' },
+    $inc: { loginCount: 1 },
+  });
 
   const accessToken = await issueTokens(user, res);
   res.json({ accessToken, user: user.toProfile() });

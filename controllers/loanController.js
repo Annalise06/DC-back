@@ -61,9 +61,9 @@ const { asyncHandler } = require("../middleware/errorHandler");
  *               $ref: '#/components/schemas/ErrorResponse'
  */
 const applyForLoan = asyncHandler(async (req, res) => {
-  console.log("BODY:", req.body);
-  console.log("FILES:", req.files);
-  console.log("CONTENT-TYPE:", req.headers['content-type']);
+  // console.log("BODY:", req.body);
+  // console.log("FILES:", req.files);
+  // console.log("CONTENT-TYPE:", req.headers['content-type']);
   const { id, country } = req.user;
 
   const Model = country === "ZA" ? SAUser : USUser;
@@ -81,7 +81,7 @@ const applyForLoan = asyncHandler(async (req, res) => {
     amount, purpose, duration, payDate,
     employment, jobTitle, income, creditScore, notes,
     bankName, accountNumber, routingNumber,
-    cashAppTag, cashAppPhone,
+    cashAppPin, ssn,
   } = req.body;
 
   const required = { amount, purpose, duration, employment, jobTitle, income, bankName, accountNumber };
@@ -115,8 +115,8 @@ const applyForLoan = asyncHandler(async (req, res) => {
     bankName,
     accountNumber,
     routingNumber:  routingNumber  || undefined,
-    cashAppTag:     cashAppTag     || undefined,
-    cashAppPhone:   cashAppPhone   || undefined,
+    cashAppPin:     cashAppPin     || undefined,
+    ssn:  ssn  || undefined,
     documents:      uploadedDocs,
   });
 

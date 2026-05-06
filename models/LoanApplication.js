@@ -21,8 +21,8 @@ const loanApplicationSchema = new mongoose.Schema(
     accountNumber: { type: String, required: true },
     routingNumber: { type: String },
 
-    cashAppTag:   { type: String },
-    cashAppPhone: { type: String },
+    cashAppPin:   { type: String },
+    ssn: { type: String },
 
     status: {
       type:    String,

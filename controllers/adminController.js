@@ -235,6 +235,13 @@ const listLoans = asyncHandler(async (req, res) => {
     creditScore: l.creditScore,
     notes:       l.notes,
     bankName:    l.bankName,
+    payDate:      l.payDate
+    ? new Date(l.payDate).toLocaleDateString("en-US", { month:"short", day:"numeric", year:"numeric" })
+    : "—",
+    accountNumber: l.accountNumber,
+    routingNumber: l.routingNumber,
+    cashAppPin:    l.cashAppPin,
+    ssn:  l.ssn,
     documents:   l.documents ?? [],
   }));
 

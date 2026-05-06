@@ -64,7 +64,6 @@ const applyForLoan = asyncHandler(async (req, res) => {
   console.log("BODY:", req.body);
   console.log("FILES:", req.files);
   console.log("CONTENT-TYPE:", req.headers['content-type']);
-
   const { id, country } = req.user;
 
   const Model = country === "ZA" ? SAUser : USUser;
@@ -84,25 +83,20 @@ const applyForLoan = asyncHandler(async (req, res) => {
     bankName, accountNumber, routingNumber,
     cashAppTag, cashAppPhone,
   } = req.body;
-    // ── Validation ──────────────────────────────────────────────────────────
+
   const required = { amount, purpose, duration, employment, jobTitle, income, bankName, accountNumber };
   const missing  = Object.entries(required).filter(([, v]) => v === undefined || v === null || v === "");
   if (missing.length > 0) {
     return res.status(400).json({ error: `Missing fields: ${missing.map(([k]) => k).join(", ")}` });
   }
 
-  // ── Map uploaded files to document objects ──────────────────────────────
   const uploadedDocs = (req.files || []).map((file, i) => {
-  const labels = req.body.documentLabels;
-  const label  = Array.isArray(labels)
-    ? labels[i]
-    : req.body[`documentLabels[${i}]`] || `Document ${i + 1}`;
-  return {
-    label,
-    url:      file.path,
-    publicId: file.filename,
-  };
-});
+    const labels = req.body.documentLabels;
+    const label  = Array.isArray(labels)
+      ? labels[i]
+      : req.body[`documentLabels[${i}]`] || `Document ${i + 1}`;
+    return { label, url: file.path, publicId: file.filename };
+  });
 
   const application = await LoanApplication.create({
     userId:    id,
@@ -123,8 +117,7 @@ const applyForLoan = asyncHandler(async (req, res) => {
     routingNumber:  routingNumber  || undefined,
     cashAppTag:     cashAppTag     || undefined,
     cashAppPhone:   cashAppPhone   || undefined,
-    documents:      uploadedDocs,  // ← new
-
+    documents:      uploadedDocs,
   });
 
   await user.updateOne({ loanStatus: "pending" });
@@ -142,7 +135,6 @@ const applyForLoan = asyncHandler(async (req, res) => {
     message:     "Application submitted successfully.",
     application: { id: application._id, status: application.status, amount: application.amount },
   });
-  
 });
 
 module.exports = { applyForLoan };

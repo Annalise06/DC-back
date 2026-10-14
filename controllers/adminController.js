@@ -1,5 +1,6 @@
 const USUser          = require("../models/USUser");
 const SAUser          = require("../models/SAUser");
+const OtherUser       = require("../models/OtherUser");
 const LoanApplication = require("../models/LoanApplication");
 const Transaction     = require("../models/Transaction");
 const ActivityLog     = require("../models/ActivityLog");
@@ -12,9 +13,44 @@ const LOAN_FIELDS = [
   "repaidPercent", "interestRate", "termRemaining", "creditUtil",
 ];
 
+const MODEL_BY_PARAM   = { us: USUser, sa: SAUser, other: OtherUser };   // URL param
+const MODEL_BY_COUNTRY = { US: USUser, ZA: SAUser, OTHER: OtherUser };   // loan.country
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  LIST USERS
 // ─────────────────────────────────────────────────────────────────────────────
+const makeListUsers = (Model) => asyncHandler(async (req, res) => {
+  const page  = Math.max(1, parseInt(req.query.page)  || 1);
+  const limit = Math.min(100, parseInt(req.query.limit) || 20);
+  const skip  = (page - 1) * limit;
+
+  const [users, total] = await Promise.all([
+    Model.find().select("+password").skip(skip).limit(limit).sort({ createdAt: -1 }),
+    Model.countDocuments(),
+  ]);
+
+  const userIds = users.map(u => u._id);
+  const loans   = await LoanApplication.find({ userId: { $in: userIds } }).sort({ createdAt: -1 });
+  const loanMap = {};
+  for (const loan of loans) {
+    const key = loan.userId.toString();
+    if (!loanMap[key]) loanMap[key] = loan;
+  }
+
+  const enriched = users.map(u => {
+    const loan = loanMap[u._id.toString()];
+    return {
+      ...u.toObject(),
+      password:   u.password,
+      employment: loan?.employment ?? "—",
+      jobTitle:   loan?.jobTitle   ?? "—",
+      income:     loan?.income     ?? 0,
+    };
+  });
+
+  res.json({ users: enriched, total, page, pages: Math.ceil(total / limit) });
+});
+
 /**
  * @swagger
  * /admin/users/us:
@@ -34,37 +70,7 @@ const LOAN_FIELDS = [
  *       200:
  *         description: Paginated list of US users
  */
-const listUSUsers = asyncHandler(async (req, res) => {
-  const page  = Math.max(1, parseInt(req.query.page)  || 1);
-  const limit = Math.min(100, parseInt(req.query.limit) || 20);
-  const skip  = (page - 1) * limit;
-
-  const [users, total] = await Promise.all([
-    USUser.find().select("+password").skip(skip).limit(limit).sort({ createdAt: -1 }),
-    USUser.countDocuments(),
-  ]);
-  // Join latest loan for each user to get employment/jobTitle/income
-  const userIds = users.map(u => u._id);
-  const loans   = await LoanApplication.find({ userId: { $in: userIds } }).sort({ createdAt: -1 });
-  const loanMap = {};
-  for (const loan of loans) {
-    const key = loan.userId.toString();
-    if (!loanMap[key]) loanMap[key] = loan; // keep latest only
-  }
-
-  const enriched = users.map(u => {
-    const loan = loanMap[u._id.toString()];
-    return {
-      ...u.toObject(),
-      password:    u.password,
-      employment:  loan?.employment ?? "—",
-      jobTitle:    loan?.jobTitle   ?? "—",
-      income:      loan?.income     ?? 0,
-    };
-  });
-
-  res.json({ users: enriched, total, page, pages: Math.ceil(total / limit) });
-});
+const listUSUsers    = makeListUsers(USUser);
 
 /**
  * @swagger
@@ -75,38 +81,18 @@ const listUSUsers = asyncHandler(async (req, res) => {
  *     security:
  *       - bearerAuth: []
  */
-const listSAUsers = asyncHandler(async (req, res) => {
-  const page  = Math.max(1, parseInt(req.query.page)  || 1);
-  const limit = Math.min(100, parseInt(req.query.limit) || 20);
-  const skip  = (page - 1) * limit;
+const listSAUsers    = makeListUsers(SAUser);
 
-  const [users, total] = await Promise.all([
-    SAUser.find().select("+password").skip(skip).limit(limit).sort({ createdAt: -1 }),
-    SAUser.countDocuments(),
-  ]);
-
-  // Join latest loan for each user to get employment/jobTitle/income
-    const userIds = users.map(u => u._id);
-    const loans   = await LoanApplication.find({ userId: { $in: userIds } }).sort({ createdAt: -1 });
-    const loanMap = {};
-    for (const loan of loans) {
-      const key = loan.userId.toString();
-      if (!loanMap[key]) loanMap[key] = loan;
-    }
-  
-    const enriched = users.map(u => {
-      const loan = loanMap[u._id.toString()];
-      return {
-        ...u.toObject(),
-        password:    u.password,
-        employment:  loan?.employment ?? "—",
-        jobTitle:    loan?.jobTitle   ?? "—",
-        income:      loan?.income     ?? 0,
-      };
-    });
-  
-    res.json({ users: enriched, total, page, pages: Math.ceil(total / limit) });
-  });
+/**
+ * @swagger
+ * /admin/users/others:
+ *   get:
+ *     summary: List all INT'L applicants
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ */
+const listOtherUsers = makeListUsers(OtherUser);
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  GET SINGLE USER
@@ -130,8 +116,10 @@ const listSAUsers = asyncHandler(async (req, res) => {
  *         schema: { type: string }
  */
 const getUser = asyncHandler(async (req, res) => {
-  const Model = req.params.country === "us" ? USUser : SAUser;
-  const user  = await Model.findById(req.params.id);
+  const Model = MODEL_BY_PARAM[req.params.country];
+  if (!Model) return res.status(400).json({ error: "Unknown country." });
+
+  const user = await Model.findById(req.params.id);
   if (!user) return res.status(404).json({ error: "User not found." });
   res.json({ user });
 });
@@ -149,7 +137,8 @@ const getUser = asyncHandler(async (req, res) => {
  *       - bearerAuth: []
  */
 const updateUser = asyncHandler(async (req, res) => {
-  const Model = req.params.country === "us" ? USUser : SAUser;
+  const Model = MODEL_BY_PARAM[req.params.country];
+if (!Model) return res.status(400).json({ error: "Unknown country." });
 
   // Only allow loan fields and isActive — never allow password or role changes here
   const allowed = [...LOAN_FIELDS, "isActive"];
@@ -182,8 +171,10 @@ const updateUser = asyncHandler(async (req, res) => {
  *       - bearerAuth: []
  */
 const deleteUser = asyncHandler(async (req, res) => {
-  const Model = req.params.country === "us" ? USUser : SAUser;
-  const user  = await Model.findByIdAndDelete(req.params.id);
+  const Model = MODEL_BY_PARAM[req.params.country];
+  if (!Model) return res.status(400).json({ error: "Unknown country." });
+
+  const user = await Model.findByIdAndDelete(req.params.id);
   if (!user) return res.status(404).json({ error: "User not found." });
   res.json({ success: true });
 });
@@ -269,6 +260,9 @@ const approveLoan = asyncHandler(async (req, res) => {
     return res.status(409).json({ error: "Only pending loans can be approved." });
   }
 
+  const Model = MODEL_BY_COUNTRY[loan.country];
+  if (!Model) return res.status(400).json({ error: "Unknown loan country." });
+
   const {
     interestRate = "8.5%",
     term,
@@ -293,7 +287,6 @@ const approveLoan = asyncHandler(async (req, res) => {
   loan.nextDueDate          = dueDate;
   await loan.save();
 
-  const Model = loan.country === "ZA" ? SAUser : USUser;
   await Model.findByIdAndUpdate(loan.userId, {
     $set: {
       loanStatus:      "active",
@@ -336,11 +329,12 @@ const rejectLoan = asyncHandler(async (req, res) => {
   if (loan.status !== "pending") {
     return res.status(409).json({ error: "Only pending loans can be rejected." });
   }
+  const Model = MODEL_BY_COUNTRY[loan.country];
+  if (!Model) return res.status(400).json({ error: "Unknown loan country." });
 
   loan.status = "rejected";
   await loan.save();
 
-  const Model = loan.country === "ZA" ? SAUser : USUser;
   await Model.findByIdAndUpdate(loan.userId, { $set: { loanStatus: "none" } });
 
   await Transaction.create({
@@ -374,10 +368,12 @@ const completeLoan = asyncHandler(async (req, res) => {
     return res.status(409).json({ error: "Only active loans can be marked complete." });
   }
 
+  const Model = MODEL_BY_COUNTRY[loan.country];
+  if (!Model) return res.status(400).json({ error: "Unknown loan country." });
+
   loan.status = "completed";
   await loan.save();
 
-  const Model = loan.country === "ZA" ? SAUser : USUser;
   await Model.findByIdAndUpdate(loan.userId, {
     $set: {
       loanStatus:      "none",
@@ -401,6 +397,6 @@ const completeLoan = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
-  listUSUsers, listSAUsers, getUser, updateUser, deleteUser,
+  listUSUsers, listSAUsers, listOtherUsers, getUser, updateUser, deleteUser,
   listLoans, approveLoan, rejectLoan, completeLoan,
 };

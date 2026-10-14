@@ -1,9 +1,12 @@
 const USUser          = require("../models/USUser");
 const SAUser          = require("../models/SAUser");
+const OtherUser       = require("../models/OtherUser");
 const LoanApplication = require("../models/LoanApplication");
 const Transaction     = require("../models/Transaction");
 const { asyncHandler } = require("../middleware/errorHandler");
 
+
+const MODEL_BY_COUNTRY = { US: USUser, ZA: SAUser, OTHER: OtherUser };
 // ─────────────────────────────────────────────────────────────────────────────
 //  APPLY FOR LOAN
 // ─────────────────────────────────────────────────────────────────────────────
@@ -66,8 +69,10 @@ const applyForLoan = asyncHandler(async (req, res) => {
   // console.log("CONTENT-TYPE:", req.headers['content-type']);
   const { id, country } = req.user;
 
-  const Model = country === "ZA" ? SAUser : USUser;
-  const user  = await Model.findById(id);
+  const Model = MODEL_BY_COUNTRY[country];
+  if (!Model) return res.status(400).json({ error: "Unknown country." });
+  
+  const user = await Model.findById(id);
   if (!user) return res.status(404).json({ error: "User not found." });
 
   if (user.loanStatus === "pending") {

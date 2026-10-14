@@ -1,5 +1,6 @@
 const USUser = require("../models/USUser");
 const SAUser = require("../models/SAUser");
+const OtherUser = require("../models/OtherUser");
 const Admin  = require("../models/Admin");
 const {
   generateAccessToken,
@@ -15,6 +16,7 @@ const { asyncHandler } = require("../middleware/errorHandler");
 const getModel = (country) => {
   if (country === "US") return USUser;
   if (country === "ZA") return SAUser;
+  if (country === "OTHER") return OtherUser;
   return null;
 };
 
@@ -141,6 +143,76 @@ const saSignup = asyncHandler(async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  OTHER (INTERNATIONAL) SIGNUP
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * @swagger
+ * /auth/other/signup:
+ *   post:
+ *     summary: Register a new applicant from a country other than the US or South Africa
+ *     tags: [Auth — Other]
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [firstName, lastName, email, phone, dob, password, address]
+ *             properties:
+ *               firstName:  { type: string, example: Ada }
+ *               lastName:   { type: string, example: Obi }
+ *               email:      { type: string, example: ada@example.com }
+ *               phone:      { type: string, example: "+2348012345678" }
+ *               gender:     { type: string, enum: [male, female, nonbinary, undisclosed] }
+ *               dob:        { type: string, format: date, example: "1995-06-20" }
+ *               password:   { type: string, example: "SecurePass1" }
+ *               address:
+ *                 type: object
+ *                 required: [country]
+ *                 properties:
+ *                   line1:      { type: string }
+ *                   line2:      { type: string }
+ *                   city:       { type: string }
+ *                   province:   { type: string }
+ *                   postalCode: { type: string }
+ *                   country:    { type: string, example: Nigeria }
+ *     responses:
+ *       201:
+ *         description: Account created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AuthResponse'
+ *       400:
+ *         description: Country is required
+ *       409:
+ *         description: Email already registered
+ */
+const otherSignup = asyncHandler(async (req, res) => {
+  const { firstName, lastName, email, phone, gender, dob, address, password } = req.body;
+ 
+  if (!address?.country?.trim()) {
+    return res.status(400).json({ error: "Country is required." });
+  }
+ 
+  const existing = await OtherUser.findOne({ email });
+  if (existing) {
+    return res.status(409).json({ error: "Email is already registered." });
+  }
+ 
+  const user = await OtherUser.create({
+    firstName, lastName, email, phone, gender,
+    dob: new Date(dob),
+    address,
+    password,
+  });
+ 
+  const accessToken = await issueTokens(user, res);
+  res.status(201).json({ accessToken, user: user.toProfile() });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  US LOGIN
 // ─────────────────────────────────────────────────────────────────────────────
 /**
@@ -255,6 +327,63 @@ const saLogin = asyncHandler(async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  OTHER (INTERNATIONAL) LOGIN
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * @swagger
+ * /auth/other/login:
+ *   post:
+ *     summary: Log in as an international applicant
+ *     tags: [Auth — Other]
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email, password]
+ *             properties:
+ *               email:    { type: string, example: ada@example.com }
+ *               password: { type: string, example: "SecurePass1" }
+ *     responses:
+ *       200:
+ *         description: Login successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AuthResponse'
+ *       401:
+ *         description: Invalid credentials
+ */
+const otherLogin = asyncHandler(async (req, res) => {
+  const { email, password } = req.body;
+ 
+  const user = await OtherUser.findOne({ email }).select("+password");
+  if (!user) {
+    return res.status(401).json({ error: "Invalid email or password." });
+  }
+ 
+  if (!user.isActive) {
+    return res.status(403).json({ error: "This account has been deactivated. Please contact support." });
+  }
+ 
+  const isMatch = await user.comparePassword(password);
+  if (!isMatch) {
+    return res.status(401).json({ error: "Invalid email or password." });
+  }
+ 
+  // ── Track login ──
+  await OtherUser.findByIdAndUpdate(user._id, {
+    $set: { lastLogin: new Date(), lastIp: req.ip || req.headers['x-forwarded-for'] || '' },
+    $inc: { loginCount: 1 },
+  });
+ 
+  const accessToken = await issueTokens(user, res);
+  res.json({ accessToken, user: user.toProfile() });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  REFRESH TOKEN
 // ─────────────────────────────────────────────────────────────────────────────
 /**
@@ -281,7 +410,7 @@ const refreshToken = asyncHandler(async (req, res) => {
   if (!token) {
     return res.status(401).json({ error: "No refresh token found. Please log in." });
   }
-
+ 
   let decoded;
   try {
     decoded = verifyRefreshToken(token);
@@ -289,43 +418,42 @@ const refreshToken = asyncHandler(async (req, res) => {
     clearRefreshCookie(res);
     return res.status(401).json({ error: "Refresh token is invalid or expired. Please log in again." });
   }
-
+ 
   let user;
   if (decoded.role === "admin") {
     user = await Admin.findById(decoded.id).select("+refreshTokens");
-  } else if (decoded.country === "US") {
-    user = await USUser.findById(decoded.id).select("+refreshTokens");
   } else {
-    user = await SAUser.findById(decoded.id).select("+refreshTokens");
+    const Model = getModel(decoded.country);
+    user = Model ? await Model.findById(decoded.id).select("+refreshTokens") : null;
   }
-
+ 
   if (!user) {
     clearRefreshCookie(res);
     return res.status(401).json({ error: "User not found. Please log in again." });
   }
-
+ 
   let matchIndex = -1;
   for (let i = 0; i < user.refreshTokens.length; i++) {
     const isMatch = await compareRefreshToken(token, user.refreshTokens[i]);
     if (isMatch) { matchIndex = i; break; }
   }
-
+ 
   if (matchIndex === -1) {
     user.refreshTokens = [];
     await user.save();
     clearRefreshCookie(res);
     return res.status(401).json({ error: "Refresh token reuse detected. All sessions have been invalidated." });
   }
-
+ 
   user.refreshTokens.splice(matchIndex, 1);
-
+ 
   const newAccessToken  = generateAccessToken(user);
   const newRefreshToken = generateRefreshToken(user);
   const hashedNew       = await hashRefreshToken(newRefreshToken);
-
+ 
   user.refreshTokens.push(hashedNew);
   await user.save();
-
+ 
   setRefreshCookie(res, newRefreshToken);
   res.json({ accessToken: newAccessToken });
 });
@@ -345,24 +473,23 @@ const refreshToken = asyncHandler(async (req, res) => {
  */
 const logout = asyncHandler(async (req, res) => {
   const token = req.cookies?.refreshToken;
-
+ 
   if (!token) {
     clearRefreshCookie(res);
     return res.json({ success: true });
   }
-
+ 
   try {
     const decoded = verifyRefreshToken(token);
-
+ 
     let user;
     if (decoded.role === "admin") {
       user = await Admin.findById(decoded.id).select("+refreshTokens");
-    } else if (decoded.country === "US") {
-      user = await USUser.findById(decoded.id).select("+refreshTokens");
     } else {
-      user = await SAUser.findById(decoded.id).select("+refreshTokens");
+      const Model = getModel(decoded.country);
+      user = Model ? await Model.findById(decoded.id).select("+refreshTokens") : null;
     }
-
+ 
     if (user) {
       const remaining = [];
       for (const hash of user.refreshTokens) {
@@ -375,11 +502,11 @@ const logout = asyncHandler(async (req, res) => {
   } catch {
     // Token already expired — still clear the cookie
   }
-
+ 
   clearRefreshCookie(res);
   res.json({ success: true });
 });
-
+ 
 // ─────────────────────────────────────────────────────────────────────────────
 //  GET /ME
 // ─────────────────────────────────────────────────────────────────────────────
@@ -406,27 +533,26 @@ const logout = asyncHandler(async (req, res) => {
  */
 const getMe = asyncHandler(async (req, res) => {
   const { id, role, country } = req.user;
-
+ 
   let user;
   if (role === "admin") {
     user = await Admin.findById(id);
-  } else if (country === "US") {
-    user = await USUser.findById(id);
   } else {
-    user = await SAUser.findById(id);
+    const Model = getModel(country);
+    user = Model ? await Model.findById(id) : null;
   }
-
+ 
   if (!user) {
     return res.status(401).json({ error: "User not found." });
   }
-
+ 
   if (role === "admin") {
     return res.json({ user: { id: user._id, email: user.email, role: "admin" } });
   }
-
+ 
   res.json({ user: user.toProfile() });
 });
-
+ 
 // ─────────────────────────────────────────────────────────────────────────────
 //  ADMIN LOGIN
 // ─────────────────────────────────────────────────────────────────────────────
@@ -455,28 +581,28 @@ const getMe = asyncHandler(async (req, res) => {
  */
 const adminLogin = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
-
+ 
   const admin = await Admin.findOne({ email }).select("+password");
   if (!admin) {
     return res.status(401).json({ error: "Invalid email or password." });
   }
-
+ 
   if (!admin.isActive) {
     return res.status(403).json({ error: "Admin account is deactivated." });
   }
-
+ 
   const isMatch = await admin.comparePassword(password);
   if (!isMatch) {
     return res.status(401).json({ error: "Invalid email or password." });
   }
-
+ 
   const accessToken = await issueTokens(admin, res);
   res.json({ accessToken, role: admin.role });
 });
-
+ 
 module.exports = {
-  usSignup, saSignup,
-  usLogin,  saLogin,
+  usSignup, saSignup, otherSignup,
+  usLogin,  saLogin,  otherLogin,
   refreshToken,
   logout,
   getMe,

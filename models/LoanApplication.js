@@ -3,7 +3,7 @@ const mongoose = require("mongoose");
 const loanApplicationSchema = new mongoose.Schema(
   {
     userId:    { type: mongoose.Schema.Types.ObjectId, required: true, index: true },
-    country:   { type: String, required: true, enum: ["US", "ZA"] },
+    country:   { type: String, required: true, enum: ["US", "ZA", "OTHER"] },
     userName:  { type: String, required: true },
     userEmail: { type: String, required: true },
 

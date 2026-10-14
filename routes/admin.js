@@ -3,7 +3,7 @@ const router  = express.Router();
 
 const { adminLogin }                                      = require("../controllers/authController");
 const {
-  listUSUsers, listSAUsers, getUser, updateUser, deleteUser,
+  listUSUsers, listSAUsers, listOtherUsers, getUser, updateUser, deleteUser,
   listLoans, approveLoan, rejectLoan, completeLoan,
 } = require("../controllers/adminController");
 const { getAdminSettings, updateSettings } = require("../controllers/settingsController");
@@ -17,6 +17,7 @@ router.use(protect, requireRole("admin"));
 
 router.get("/users/us",              listUSUsers);
 router.get("/users/sa",              listSAUsers);
+router.get("/users/other",           listOtherUsers);
 router.get("/users/:country/:id",    getUser);
 router.patch("/users/:country/:id",  updateUser);
 router.delete("/users/:country/:id", deleteUser);

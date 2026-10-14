@@ -4,6 +4,7 @@ const router  = express.Router();
 const {
   usSignup, saSignup,
   usLogin,  saLogin,
+  otherSignup, otherLogin,
   refreshToken,
   logout,
   getMe,
@@ -14,6 +15,8 @@ router.post("/us/signup", usSignup);
 router.post("/us/login",  usLogin);
 router.post("/sa/signup", saSignup);
 router.post("/sa/login",  saLogin);
+router.post("/intl/signup", otherSignup);
+router.post("/intl/login",  otherLogin);
 
 router.post("/refresh", refreshToken);
 router.post("/logout",  logout);

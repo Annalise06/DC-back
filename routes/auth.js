@@ -15,8 +15,8 @@ router.post("/us/signup", usSignup);
 router.post("/us/login",  usLogin);
 router.post("/sa/signup", saSignup);
 router.post("/sa/login",  saLogin);
-router.post("/intl/signup", otherSignup);
-router.post("/intl/login",  otherLogin);
+router.post("/other/signup", otherSignup);
+router.post("/other/login",  otherLogin);
 
 router.post("/refresh", refreshToken);
 router.post("/logout",  logout);
